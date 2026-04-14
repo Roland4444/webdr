@@ -49,13 +49,10 @@ fn is_good_android(user_name: &str) -> bool {
     }
 }
 async fn click_safety_in_iframe(driver: &WebDriver) -> Result<()> {
-    // Ждём появления iframe (не обязательно, но может помочь)
     sleep(Duration::from_secs(2)).await;
     let iframes = driver.find_all(By::Tag("iframe")).await?;
     for (idx, iframe) in iframes.iter().enumerate() {
-        // Пытаемся переключиться в iframe
         if let Ok(_) = driver.enter_frame(idx as u16).await {
-            // Ищем кнопку внутри фрейма
             let elements = driver.find_all(By::ClassName("ui-btn-text-inner")).await?;
             for el in elements {
                 let text = el.text().await.unwrap_or_default();
@@ -65,15 +62,12 @@ async fn click_safety_in_iframe(driver: &WebDriver) -> Result<()> {
                     return Ok(());
                 }
             }
-            // Если кнопка не найдена, выходим из фрейма и продолжаем поиск
             driver.enter_default_frame().await?;
         }
     }
-    // Если ни один iframe не подошёл, возвращаем ошибку (или просто Ok(()), если не критично)
     anyhow::bail!("Не найден iframe с кнопкой 'Безопасность'");
 }
 
-/// Ищет во всех iframe ссылку "История входов" и кликает по ней.
 async fn click_history_in_iframe(driver: &WebDriver) -> Result<()> {
     sleep(Duration::from_secs(2)).await;
     let iframes = driver.find_all(By::Tag("iframe")).await?;
@@ -101,7 +95,7 @@ async fn process_user(driver: &WebDriver,  user_id: u32, full_name: &str, base_u
         static  mut  FIRST_LOAD: bool = true;
         unsafe {
             if FIRST_LOAD {
-                sleep(Duration::from_secs(30)).await; // исправлено
+                sleep(Duration::from_secs(30)).await;
                 FIRST_LOAD = false;
 
             }
@@ -119,7 +113,7 @@ async fn process_user(driver: &WebDriver,  user_id: u32, full_name: &str, base_u
         search_input.clear().await?;
         search_input.send_keys(full_name).await?;
         search_input.send_keys(Key::Return).await?;
-        sleep(Duration::from_secs(2)).await; // важно
+        sleep(Duration::from_secs(2)).await; 
 
         let profile_links = driver.find_all(By::ClassName("user-grid_full-name-label")).await?;
         if profile_links.is_empty() {
@@ -160,7 +154,6 @@ async fn wait_for_element(driver: &WebDriver, by: By, timeout_secs: u64) -> Resu
     anyhow::bail!("Элемент не найден за {} секунд", timeout_secs)
 }
 
-/// Сохраняет все tbody таблицы (как в Scala)
 async fn save_table_tbodies(table: &WebElement, filename: &str) -> Result<()> {
     let tbodies = table.find_all(By::Tag("tbody")).await?;
     println!("Найдено tbody элементов: {}", tbodies.len());
@@ -170,7 +163,6 @@ async fn save_table_tbodies(table: &WebElement, filename: &str) -> Result<()> {
         let rows = tbody.find_all(By::Tag("tr")).await?;
         println!("   TBODY #{}: {} строк", idx + 1, rows.len());
 
-        // Используем outer_html() вместо attr("outerHTML")
         if let Ok(html) = tbody.outer_html().await {
             content.push_str(&format!("[TBODY #{}]\n", idx + 1));
             content.push_str(&"-".repeat(40));
@@ -178,7 +170,6 @@ async fn save_table_tbodies(table: &WebElement, filename: &str) -> Result<()> {
             content.push_str(&html);
             content.push_str("\n\n");
         } else {
-            // Если outer_html не работает, пробуем inner_html
             if let Ok(html) = tbody.inner_html().await {
                 content.push_str(&format!("[TBODY #{} (inner)]\n", idx + 1));
                 content.push_str(&html);
@@ -195,7 +186,6 @@ async fn save_table_tbodies(table: &WebElement, filename: &str) -> Result<()> {
     }
     Ok(())
 }
-/// Прямой переход в 4-й iframe (индекс 3) и сохранение таблицы
 async fn find_table_in_fourth_iframe_and_save(driver: &WebDriver, user_name: &str) -> Result<String> {
     let filename = format!("{}_history.html", user_name);
     driver.enter_default_frame().await?;
@@ -206,7 +196,7 @@ async fn find_table_in_fourth_iframe_and_save(driver: &WebDriver, user_name: &st
         anyhow::bail!("Нет iframe с индексом 3, всего iframe: {}", iframes.len());
     }
 
-    driver.enter_frame(3).await?; // 4-й iframe
+    driver.enter_frame(3).await?;
     println!("✓ Переключились на iframe #4");
 
     let table = wait_for_element(driver, By::Id("login_history_grid_table"), 10).await?;
@@ -217,7 +207,6 @@ async fn find_table_in_fourth_iframe_and_save(driver: &WebDriver, user_name: &st
     Ok(filename)
 }
 
-/// Запасной метод: перебор всех iframe
 async fn fallback_find_table(driver: &WebDriver, user_name: &str) -> Result<String> {
     let filename = format!("{}_history.html", user_name);
     println!("=== Запасной метод: перебор всех iframe ===");
@@ -241,11 +230,8 @@ async fn fallback_find_table(driver: &WebDriver, user_name: &str) -> Result<Stri
     anyhow::bail!("Таблица не найдена ни в одном iframe")
 }
 
-/// Основной метод поиска таблицы (аналог findTableAfterClickingHistory)
 async fn find_table_after_clicking_history(driver: &WebDriver, user_name: &str) -> Result<String> {
     println!("=== Поиск таблицы для пользователя: {} ===", user_name);
-
-    // 1. Пробуем найти в текущем контексте (ожидание до 5 секунд)
     if let Ok(table) = wait_for_element(driver, By::Id("login_history_grid_table"), 5).await {
         println!("✓ Таблица найдена в текущем контексте");
         let filename = format!("{}_history.html", user_name);
@@ -253,7 +239,6 @@ async fn find_table_after_clicking_history(driver: &WebDriver, user_name: &str) 
         return Ok(filename);
     }
 
-    // 2. Пробуем 4-й iframe
     match find_table_in_fourth_iframe_and_save(driver, user_name).await {
         Ok(f) => Ok(f),
         Err(e) => {
@@ -263,45 +248,6 @@ async fn find_table_after_clicking_history(driver: &WebDriver, user_name: &str) 
         }
     }
 }
-
-// async fn find_and_save_history_table(driver: &WebDriver, user_name: &str) -> Result<String>{
-//     let filename = format!("{}_history.html", user_name);
-//     if let Ok(table) = driver.find(By::Id("login_history_grid_table")).await{
-//         save_table_tbodies(&table, &filename).await?;
-//         return Ok(filename);
-//     }
-//     let iframes = driver.find_all(By::Tag("iframe")).await?;
-//     for idx in 0..iframes.len(){
-//         if driver.enter_frame(idx as u16).await.is_ok(){
-//             if let Ok(table) = driver.find(By::Id("login_history_grid_table")).await{
-//                 save_table_tbodies(&table, &filename).await?;
-//                 driver.enter_default_frame().await?;
-//                 return Ok(filename);
-//             }
-//             driver.enter_default_frame().await?;
-//         }
-//     }
-//     anyhow::bail!("Таблица истории не найдена ни в одном iframe")
-// }
-
-// async fn save_table_tbodies(table: &WebElement, filename: &str) -> Result<()>{
-//     let tbodies = table.find_all(By::Tag("tbody")).await?;
-//     let mut content = String::new();
-//     for tbody in tbodies {
-//         let rows = tbody.find_all(By::Tag("tr")).await?;
-//         for row in rows {
-//             if let Ok(Some(html)) = row.get_attribute("outerHTML").await {
-//                 content.push_str(&html);
-//                 content.push('\n');
-//             }
-//         }
-//     }
-//     fs::write(filename, content)?;
-//     println!("Save strings history{}", filename);
-//     Ok(())
-// }
-
-
 
 #[tokio::main]
 async fn main() -> Result<()> {
