@@ -263,7 +263,9 @@ async fn main() -> Result<()> {
     return Ok(());
   }
 
-    let caps = DesiredCapabilities::chrome();
+  let mut caps = DesiredCapabilities::chrome();
+  let _ = caps.add_arg("--no-sandbox");
+  let _ = caps.add_arg("--disable-dev-shm-usage");
   let driver = WebDriver::new("http://localhost:21000", caps).await?; 
 
   let mut not_found = Vec::new();
