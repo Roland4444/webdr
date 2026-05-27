@@ -249,8 +249,12 @@ async fn find_table_after_clicking_history(driver: &WebDriver, user_name: &str) 
     }
 }
 
+use std::time::Instant;
 #[tokio::main]
 async fn main() -> Result<()> {
+  let start = Instant::now();
+  println!("Начало выполнения: {:?}", start);
+
   const USERS_FILE: &str = "USERS";
   const NOT_FOUND_FILE: &str = "NOT_FOUND_NAME.txt";
   const MOBILE_NICE_FILE: &str = "MOBILE_NICE_NAME.txt";
@@ -293,5 +297,8 @@ for name in &mobile_no {
 }
 
   driver.quit().await?;
+
+  let duration = start.elapsed();
+  println!("Завершение. Выполнение заняло: {:?}", duration);
   Ok(())
 }
