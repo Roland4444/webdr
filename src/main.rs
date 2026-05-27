@@ -7,6 +7,8 @@ use thirtyfour::Key;
 use thirtyfour::prelude::*;
 use tokio::sync::Mutex;
 use tokio::time::{Duration, sleep};
+use std::time::Instant;
+
 
 pub const PASS_FIELNAME: &str = "pass";
 const LOGIN_FILENAME: &str = "login";
@@ -153,7 +155,7 @@ async fn process_user(
     if profile_links.is_empty() {
         println!("NOT FOUND: {}", full_name);
         not_found_list.push(full_name.to_string());
-        append_to_file("NOT_FOUND_NAME.txt", full_name)?;
+    //    append_to_file("NOT_FOUND_NAME.txt", full_name)?;
         return Ok(());
     }
 
@@ -169,10 +171,10 @@ async fn process_user(
 
     if is_good_android(full_name) {
         mobile_nice.push(full_name.to_string());
-        append_to_file("MOBILE_NICE_NAME.txt", full_name)?;
+    //    append_to_file("MOBILE_NICE_NAME.txt", full_name)?;
     } else {
         mobile_no.push(full_name.to_string());
-        append_to_file("MOBILE_NO.txt", full_name)?;
+    //    append_to_file("MOBILE_NO.txt", full_name)?;
     }
 
     Ok(())
@@ -376,6 +378,8 @@ fn split_vec_4_vec(input: Vec<(u32, String)>, split_to: u32) -> Vec<Vec<(u32, St
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let start = Instant::now();
+    println!("Начало выполнения: {:?}", start);
     const USERS_FILE: &str = "USERS";
     const NOT_FOUND_FILE: &str = "NOT_FOUND_NAME.txt";
     const MOBILE_NICE_FILE: &str = "MOBILE_NICE_NAME.txt";
@@ -392,7 +396,7 @@ async fn main() -> Result<()> {
     let _ = caps.add_arg("--disable-dev-shm-usage");
     let mut driver_pack: Vec<WebDriver> = vec![];
 
-    let number_drivers: u32 = 6;
+    let number_drivers: u32 = 8;
 
     let BASE_URL: String = "https://relits.bitrix24.ru".to_string();
     let BASE_URL2: String = "https://relits.bitrix24.ru".to_string();
@@ -406,7 +410,7 @@ async fn main() -> Result<()> {
     let mobile_nice = Arc::new(Mutex::new(Vec::new()));
     let mobile_no = Arc::new(Mutex::new(Vec::new()));
 
-    
+
 
 
     let mut id_vecs_4_druver: Vec<Vec<(u32, String)>> = vec![];
@@ -500,6 +504,10 @@ async fn main() -> Result<()> {
     }
 
 
+    std::fs::write(NOT_FOUND_FILE, not_found_guard.join("\n"))?;
+    std::fs::write(MOBILE_NICE_FILE, mobile_nice_guard.join("\n"))?;
+    std::fs::write(MOBILE_NO_FILE, mobile_no_guard.join("\n"))?;
+
 
 
 
@@ -544,7 +552,8 @@ async fn main() -> Result<()> {
 
   }
 
-
+    let duration = start.elapsed();
+    println!("Завершение. Выполнение заняло: {:?}", duration);
 
     Ok(())
 }
