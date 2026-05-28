@@ -5,6 +5,8 @@ use tokio::time::{sleep, Duration};
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, Write};
 use thirtyfour::Key;
+use std::time::Instant;
+
 
 fn read_users(file_path: &str) -> Result<Vec<(u32, String)>>{
     let file = File::open(file_path).context("unable to open file USERS")?;
@@ -249,7 +251,6 @@ async fn find_table_after_clicking_history(driver: &WebDriver, user_name: &str) 
     }
 }
 
-use std::time::Instant;
 #[tokio::main]
 async fn main() -> Result<()> {
   let start = Instant::now();
