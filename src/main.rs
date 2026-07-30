@@ -1,21 +1,44 @@
 use anyhow::{Context, Result};
-use thirtyfour::prelude::*;
-use thirtyfour::By;
-use tokio::time::{sleep, Duration};
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, Write};
+use std::sync::Arc;
+use thirtyfour::By;
 use thirtyfour::Key;
+use thirtyfour::prelude::*;
+use tokio::sync::Mutex;
+use tokio::time::{Duration, sleep};
 use std::time::Instant;
 
 
-fn read_users(file_path: &str) -> Result<Vec<(u32, String)>>{
+pub const PASS_FIELNAME: &str = "pass";
+const LOGIN_FILENAME: &str = "login";
+
+const URL_WS_CONNECT: &str = "ws://127.0.0.1:3000/proc";
+
+fn pass() -> Option<String> {
+    read_from_file(PASS_FIELNAME)
+}
+
+fn login() -> Option<String> {
+    read_from_file(LOGIN_FILENAME)
+}
+
+fn read_from_file(filename: &str) -> Option<String> {
+    let g = fs::read_to_string(filename);
+    match g {
+        Ok(str) => Some(str),
+        Err(_) => None,
+    }
+}
+
+fn read_users(file_path: &str) -> Result<Vec<(u32, String)>> {
     let file = File::open(file_path).context("unable to open file USERS")?;
-    let reader  = BufReader::new(file);
+    let reader = BufReader::new(file);
     let mut users = Vec::new();
 
-    for line in reader.lines(){
+    for line in reader.lines() {
         let line__ = line?;
-        if line__.trim().is_empty(){
+        if line__.trim().is_empty() {
             continue;
         }
         let space_idx = line__.find(' ').unwrap_or(line__.len());
@@ -31,7 +54,7 @@ fn read_users(file_path: &str) -> Result<Vec<(u32, String)>>{
     Ok(users)
 }
 
-fn append_to_file(fila_name: &str, data: &str) -> Result<()>{
+fn append_to_file(fila_name: &str, data: &str) -> Result<()> {
     let mut file = fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -41,109 +64,180 @@ fn append_to_file(fila_name: &str, data: &str) -> Result<()>{
     Ok(())
 }
 
-
 fn is_good_android(user_name: &str) -> bool {
     let filename = format!("{}_history.html", user_name);
-    if let Ok(html) = fs::read_to_string(&filename){
+    if let Ok(html) = fs::read_to_string(&filename) {
         html.contains("iOS") || html.contains("Android")
     } else {
         false
     }
 }
-async fn click_safety_in_iframe(driver: &WebDriver) -> Result<()> {
-    sleep(Duration::from_secs(2)).await;
-    let iframes = driver.find_all(By::Tag("iframe")).await?;
-    for (idx, iframe) in iframes.iter().enumerate() {
-        if let Ok(_) = driver.enter_frame(idx as u16).await {
-            let elements = driver.find_all(By::ClassName("ui-btn-text-inner")).await?;
-            for el in elements {
-                let text = el.text().await.unwrap_or_default();
-                if text.contains("Безопасность") {
-                    el.click().await?;
-                    driver.enter_default_frame().await?;
-                    return Ok(());
-                }
-            }
-            driver.enter_default_frame().await?;
-        }
-    }
-    anyhow::bail!("Не найден iframe с кнопкой 'Безопасность'");
-}
+// async fn click_safety_in_iframe(driver: &WebDriver) -> Result<()> {
+//     sleep(Duration::from_secs(2)).await;
+//     let iframes = driver.find_all(By::Tag("iframe")).await?;
+//     for (idx, iframe) in iframes.iter().enumerate() {
+//         if let Ok(_) = driver.enter_frame(idx as u16).await {
+//             let elements = driver.find_all(By::ClassName("ui-btn-text-inner")).await?;
+//             for el in elements {
+//                 let text = el.text().await.unwrap_or_default();
+//                 if text.contains("Безопасность") {
+//                     el.click().await?;
+//                     driver.enter_default_frame().await?;
+//                     return Ok(());
+//                 }
+//             }
+//             driver.enter_default_frame().await?;
+//         }
+//     }
+//     anyhow::bail!("Не найден iframe с кнопкой 'Безопасность'");
+// }
 
-async fn click_history_in_iframe(driver: &WebDriver) -> Result<()> {
-    sleep(Duration::from_secs(2)).await;
+
+async fn click_safety_in_iframe(driver: &WebDriver) -> Result<()> {
+    sleep(Duration::from_secs(3)).await;
     let iframes = driver.find_all(By::Tag("iframe")).await?;
-    for (idx, iframe) in iframes.iter().enumerate() {
-        if let Ok(_) = driver.enter_frame(idx as u16).await {
-            let elements = driver
-                .find_all(By::XPath("//div[@class='ui-sidepanel-menu-link-text' and text()='История входов']"))
-                .await?;
-            if !elements.is_empty() {
-                elements[0].click().await?;
+    for (idx, _) in iframes.iter().enumerate() {
+        if driver.enter_frame(idx as u16).await.is_ok() {
+            // Ищем кнопку с текстом "Безопасность" (можно искать по XPath)
+            let btn = driver
+                .query(By::XPath("//*[contains(text(), 'Безопасность')]"))
+                .wait(Duration::from_secs(5), Duration::from_millis(500))
+                .and_clickable()
+                .first()
+                .await;
+            if let Ok(b) = btn {
+                b.scroll_into_view().await?;
+                // Пробуем кликнуть, если не выходит — через JS
+                if let Err(e) = b.click().await {
+                    driver.execute("arguments[0].click();", vec![b.to_json()?]).await?;
+                }
                 driver.enter_default_frame().await?;
                 return Ok(());
             }
             driver.enter_default_frame().await?;
         }
     }
-    anyhow::bail!("Не найден iframe с 'История входов'");
+    anyhow::bail!("Кнопка 'Безопасность' не найдена ни в одном iframe");
 }
-async fn process_user(driver: &WebDriver,  user_id: u32, full_name: &str, base_url: &str, not_found_list: &mut Vec<String>, 
-    mobile_nice: &mut Vec<String>, mobile_no: &mut Vec<String>) -> Result<()>{
-        let profile_url = format!("{}/company/personal/user/{}", base_url, user_id);
-        println!("LINK::{}", profile_url);
-        driver.goto(&profile_url).await?;
 
-        static  mut  FIRST_LOAD: bool = true;
-        unsafe {
-            if FIRST_LOAD {
-                sleep(Duration::from_secs(30)).await;
-                FIRST_LOAD = false;
 
+
+
+
+
+async fn click_history_in_iframe(driver: &WebDriver) -> Result<()> {
+    sleep(Duration::from_secs(2)).await;
+    let iframes = driver.find_all(By::Tag("iframe")).await?;
+    for (idx, _) in iframes.iter().enumerate() {
+        if driver.enter_frame(idx as u16).await.is_ok() {
+            let btn = driver
+                .query(By::XPath("//*[contains(text(), 'История входов')]"))
+                .wait(Duration::from_secs(5), Duration::from_millis(500))
+                .and_clickable()
+                .first()
+                .await;
+            if let Ok(b) = btn {
+                b.scroll_into_view().await?;
+                if let Err(e) = b.click().await {
+                    driver.execute("arguments[0].click();", vec![b.to_json()?]).await?;
+                }
+                driver.enter_default_frame().await?;
+                return Ok(());
             }
+            driver.enter_default_frame().await?;
         }
-        let menu_items = driver.find_all(By::ClassName("menu-item-link-text")).await?;
-        if menu_items.len() > 12 {
-            menu_items[12].click().await?;
-        } else {
-            anyhow::bail!("Меню слишком короткое");
+    }
+    anyhow::bail!("Кнопка 'История входов' не найдена");
+}
+
+
+
+// async fn click_history_in_iframe(driver: &WebDriver) -> Result<()> {
+//     sleep(Duration::from_secs(2)).await;
+//     let iframes = driver.find_all(By::Tag("iframe")).await?;
+//     for (idx, iframe) in iframes.iter().enumerate() {
+//         if let Ok(_) = driver.enter_frame(idx as u16).await {
+//             let elements = driver
+//                 .find_all(By::XPath(
+//                     "//div[@class='ui-sidepanel-menu-link-text' and text()='История входов']",
+//                 ))
+//                 .await?;
+//             if !elements.is_empty() {
+//                 elements[0].click().await?;
+//                 driver.enter_default_frame().await?;
+//                 return Ok(());
+//             }
+//             driver.enter_default_frame().await?;
+//         }
+//     }
+//     anyhow::bail!("Не найден iframe с 'История входов'");
+// }
+async fn process_user(
+    driver: &WebDriver,
+    user_id: u32,
+    full_name: &str,
+    base_url: &str,
+    not_found_list: &mut Vec<String>,
+    mobile_nice: &mut Vec<String>,
+    mobile_no: &mut Vec<String>,
+) -> Result<()> {
+    let profile_url = format!("{}/company/personal/user/{}", base_url, user_id);
+    println!("LINK::{}", profile_url);
+    driver.goto(&profile_url).await?;
+
+    static mut FIRST_LOAD: bool = true;
+    unsafe {
+        if FIRST_LOAD {
+            sleep(Duration::from_secs(30)).await;
+            FIRST_LOAD = false;
         }
+    }
+    let menu_items = driver
+        .find_all(By::ClassName("menu-item-link-text"))
+        .await?;
+    if menu_items.len() > 12 {
+        menu_items[12].click().await?;
+    } else {
+        anyhow::bail!("Меню слишком короткое");
+    }
 
-        sleep(Duration::from_secs(4)).await;
+    sleep(Duration::from_secs(4)).await;
 
-        let search_input = driver.find(By::Id("INTRANET_USER_LIST_s1_search")).await?;
-        search_input.clear().await?;
-        search_input.send_keys(full_name).await?;
-        search_input.send_keys(Key::Return).await?;
-        sleep(Duration::from_secs(2)).await; 
+    let search_input = driver.find(By::Id("INTRANET_USER_LIST_s1_search")).await?;
+    search_input.clear().await?;
+    search_input.send_keys(full_name).await?;
+    search_input.send_keys(Key::Return).await?;
+    sleep(Duration::from_secs(2)).await;
 
-        let profile_links = driver.find_all(By::ClassName("user-grid_full-name-label")).await?;
-        if profile_links.is_empty() {
-            println!("NOT FOUND: {}", full_name);
-            not_found_list.push(full_name.to_string());
-            append_to_file("NOT_FOUND_NAME.txt", full_name)?;
-            return Ok(());
-        }
+    let profile_links = driver
+        .find_all(By::ClassName("user-grid_full-name-label"))
+        .await?;
+    if profile_links.is_empty() {
+        println!("NOT FOUND: {}", full_name);
+        not_found_list.push(full_name.to_string());
+    //    append_to_file("NOT_FOUND_NAME.txt", full_name)?;
+        return Ok(());
+    }
 
-        profile_links[0].click().await?;
-        sleep(Duration::from_secs(2)).await;
+    profile_links[0].click().await?;
+    sleep(Duration::from_secs(2)).await;
 
-        click_safety_in_iframe(driver).await?;
-        sleep(Duration::from_secs(2)).await;
-        click_history_in_iframe(driver).await?;
+    click_safety_in_iframe(driver).await?;
+    sleep(Duration::from_secs(2)).await;
+    click_history_in_iframe(driver).await?;
 
-        let filename = find_table_after_clicking_history(driver, full_name).await?;
-        println!("Сохранена история в {}", filename);
+    let filename = find_table_after_clicking_history(driver, full_name).await?;
+    println!("Сохранена история в {}", filename);
 
-        if is_good_android(full_name) {
-            mobile_nice.push(full_name.to_string());
-            append_to_file("MOBILE_NICE_NAME.txt", full_name)?;
-        } else {
-            mobile_no.push(full_name.to_string());
-            append_to_file("MOBILE_NO.txt", full_name)?;
-        }
+    if is_good_android(full_name) {
+        mobile_nice.push(full_name.to_string());
+    //    append_to_file("MOBILE_NICE_NAME.txt", full_name)?;
+    } else {
+        mobile_no.push(full_name.to_string());
+    //    append_to_file("MOBILE_NO.txt", full_name)?;
+    }
 
-        Ok(())
+    Ok(())
 }
 async fn wait_for_element(driver: &WebDriver, by: By, timeout_secs: u64) -> Result<WebElement> {
     let start = std::time::Instant::now();
@@ -188,7 +282,10 @@ async fn save_table_tbodies(table: &WebElement, filename: &str) -> Result<()> {
     }
     Ok(())
 }
-async fn find_table_in_fourth_iframe_and_save(driver: &WebDriver, user_name: &str) -> Result<String> {
+async fn find_table_in_fourth_iframe_and_save(
+    driver: &WebDriver,
+    user_name: &str,
+) -> Result<String> {
     let filename = format!("{}_history.html", user_name);
     driver.enter_default_frame().await?;
 
@@ -251,55 +348,272 @@ async fn find_table_after_clicking_history(driver: &WebDriver, user_name: &str) 
     }
 }
 
+async fn login_cad(driver: &WebDriver, username: &str, pass: &str) -> Result<()> {
+    // Поле логина
+    let login_field = driver
+        .query(By::Css("input.b24net-text-input__field[type='text']"))
+        .wait(Duration::from_secs(10), Duration::from_millis(500))
+        .and_clickable()
+        .first()
+        .await
+        .context("Поле логина не появилось")?;
+    login_field.send_keys(username).await?;
+
+    // Кнопка "Продолжить" (первая)
+    let continue_btn = driver
+        .query(By::Css(".b24net-login-enter-form__continue-btn"))
+        .wait(Duration::from_secs(10), Duration::from_millis(500))
+        .and_clickable()
+        .first()
+        .await
+        .context("Кнопка 'Продолжить' не появилась")?;
+    continue_btn.click().await?;
+
+    // Поле пароля
+    let password_field = driver
+        .query(By::Css("input.b24net-text-input__field[type='password']"))
+        .wait(Duration::from_secs(30), Duration::from_millis(500))
+        .and_clickable()
+        .first()
+        .await
+        .context("Поле пароля не появилось")?;
+    password_field.send_keys(pass).await?;
+
+    // Кнопка "Продолжить" (вторая)
+    let submit_btn = driver
+        .query(By::Css(".b24net-password-enter-form__continue-btn"))
+        .wait(Duration::from_secs(10), Duration::from_millis(500))
+        .and_clickable()
+        .first()
+        .await
+        .context("Кнопка 'Продолжить' после пароля не появилась")?;
+    submit_btn.click().await?;
+
+    Ok(())
+}
+
+async fn spawn_cdriver_and_login(base_url: String) -> WebDriver {
+    let mut caps = DesiredCapabilities::chrome();
+    let _ = caps.add_arg("--no-sandbox");
+    let _ = caps.add_arg("--disable-dev-shm-usage");
+    let _ = caps.add_arg("--window-size=1920,1080");
+
+    let driver: WebDriver = WebDriver::new("http://localhost:21000", caps)
+        .await
+        .expect("shit happens");
+    let user_id = 1;
+    let profile_url = format!("{}/company/personal/user/{}", base_url, user_id);
+    let _ = driver.goto(&profile_url).await;
+    let _ = login_cad(&driver, login().unwrap().as_str(), pass().unwrap().as_str()).await;
+    driver
+}
+
+// fn split_vec_4_vec(input: Vec<(u32, String)>, split_to: u32) -> Vec<Vec<(u32, String)>> {
+//     let mut res: Vec<Vec<(u32, String)>> = vec![];
+//     let mut cur_vec: Vec<(u32, String)> = vec![];
+
+//     let mut cur_idx = 1;
+//     for (id, name) in input {
+//         println!("USER:: {}, index:: {}", name, id);
+//         if cur_idx == split_to {
+//             res.push(cur_vec);
+//             cur_idx = 1;
+//             cur_vec = vec![];
+//         }
+//         cur_vec.push((id, name));
+//         cur_idx += 1;
+//     }
+//     res
+// }
+
+fn split_vec_4_vec(input: Vec<(u32, String)>, split_to: u32) -> Vec<Vec<(u32, String)>> {
+    let mut res: Vec<Vec<(u32, String)>> = vec![Vec::new(); split_to as usize];
+    for (idx, item) in input.into_iter().enumerate() {
+        let group_idx = idx % (split_to as usize);
+        res[group_idx].push(item);
+    }
+    res
+}
+
+
 #[tokio::main]
 async fn main() -> Result<()> {
-  let start = Instant::now();
-  println!("Начало выполнения: {:?}", start);
+    let start = Instant::now();
+    println!("Начало выполнения: {:?}", start);
+    const USERS_FILE: &str = "USERS";
+    const NOT_FOUND_FILE: &str = "NOT_FOUND_NAME.txt";
+    const MOBILE_NICE_FILE: &str = "MOBILE_NICE_NAME.txt";
+    const MOBILE_NO_FILE: &str = "MOBILE_NO.txt";
 
-  const USERS_FILE: &str = "USERS";
-  const NOT_FOUND_FILE: &str = "NOT_FOUND_NAME.txt";
-  const MOBILE_NICE_FILE: &str = "MOBILE_NICE_NAME.txt";
-  const MOBILE_NO_FILE: &str = "MOBILE_NO.txt";
-  const BASE_URL: &str = "https://relits.bitrix24.ru";
-
-  let users = read_users(USERS_FILE)?;
-  if users.is_empty() {
-    println!("Нет пользователей в файле");
-    return Ok(());
-  }
-
-  let mut caps = DesiredCapabilities::chrome();
-  let _ = caps.add_arg("--no-sandbox");
-  let _ = caps.add_arg("--disable-dev-shm-usage");
-  let driver = WebDriver::new("http://localhost:21000", caps).await?; 
-
-  let mut not_found = Vec::new();
-  let mut mobile_nice = Vec::new();
-  let mut mobile_no = Vec::new();
-
-  for (id, name) in users {
-    println!("USER:: {},   index:: {}", name, id);
-    if let Err(e) = process_user(&driver, id, &name, BASE_URL, &mut not_found, &mut mobile_nice, &mut mobile_no).await {
-      eprintln!("Ошибка при обработке {}: {}", name, e);
+    let users = read_users(USERS_FILE)?;
+    if users.is_empty() {
+        println!("Нет пользователей в файле");
+        return Ok(());
     }
+
+    let mut caps = DesiredCapabilities::chrome();
+    let _ = caps.add_arg("--no-sandbox");
+    let _ = caps.add_arg("--disable-dev-shm-usage");
+    let mut driver_pack: Vec<WebDriver> = vec![];
+
+    let number_drivers: u32 = 8;
+
+    let BASE_URL: String = "https://relits.bitrix24.ru".to_string();
+    let BASE_URL2: String = "https://relits.bitrix24.ru".to_string();
+    let BASE_URL3 = "https://relits.bitrix24.ru";
+
+    
+
+ {  // multythreadf
+
+    let not_found = Arc::new(Mutex::new(Vec::new()));
+    let mobile_nice = Arc::new(Mutex::new(Vec::new()));
+    let mobile_no = Arc::new(Mutex::new(Vec::new()));
+
+
+
+
+    let mut id_vecs_4_druver: Vec<Vec<(u32, String)>> = vec![];
+
+   // let splitted_id_users = split_vec_4_vec(users, number_drivers);
+
+   let groups = split_vec_4_vec(users, number_drivers);
+    for i in 1..=number_drivers {
+        let driver = spawn_cdriver_and_login(BASE_URL.clone()).await;
+        driver_pack.push(driver);
+    }
+
+
+
+
+
+    let mut tasks = Vec::new();
+    for (i, group) in groups.into_iter().enumerate() {
+        let driver = driver_pack[i].clone();
+        let not_found_clone = not_found.clone();
+        let mobile_nice_clone = mobile_nice.clone();
+        let mobile_no_clone = mobile_no.clone();
+
+        let task = tokio::spawn(async move {
+            // Локальные буферы для этой задачи
+            let mut local_not_found = Vec::new();
+            let mut local_mobile_nice = Vec::new();
+            let mut local_mobile_no = Vec::new();
+
+            for (id, name) in group {
+                println!("Поток {} обрабатывает {} (ID {})", i, name, id);
+                if let Err(e) = process_user(
+                    &driver,
+                    id,
+                    &name,
+                    BASE_URL3,
+                    &mut local_not_found,
+                    &mut local_mobile_nice,
+                    &mut local_mobile_no,
+                )
+                .await
+                {
+                    eprintln!("Ошибка при обработке {}: {}", name, e);
+                }
+            }
+
+            // Добавляем локальные результаты в глобальные векторы
+            {
+                let mut guard = not_found_clone.lock().await;
+                guard.extend(local_not_found);
+            }
+            {
+                let mut guard = mobile_nice_clone.lock().await;
+                guard.extend(local_mobile_nice);
+            }
+            {
+                let mut guard = mobile_no_clone.lock().await;
+                guard.extend(local_mobile_no);
+            }
+
+            Ok::<_, anyhow::Error>(())
+        });
+        tasks.push(task);
+    }
+
+    // Ожидаем завершения всех задач
+    for task in tasks {
+        if let Err(e) = task.await {
+            eprintln!("Задача завершилась с ошибкой: {:?}", e);
+        }
+    }
+
+    let not_found_guard = not_found.lock().await;
+    println!("\nNOT FOUND:");
+    for name in not_found_guard.iter() {
+        println!("{}", name);
+    }
+    let mobile_nice_guard = mobile_nice.lock().await;
+    println!("\nGOOD MOBILE:");
+    for name in mobile_nice_guard.iter() {
+        println!("{}", name);
+    }
+
+    let mobile_no_guard = mobile_no.lock().await;
+    println!("\nNO MOBILE:");
+    for name in mobile_no_guard.iter() {
+        println!("{}", name);
+    }
+    for dr in driver_pack{
+        dr.quit().await?;
+    }
+
+
+    std::fs::write(NOT_FOUND_FILE, not_found_guard.join("\n"))?;
+    std::fs::write(MOBILE_NICE_FILE, mobile_nice_guard.join("\n"))?;
+    std::fs::write(MOBILE_NO_FILE, mobile_no_guard.join("\n"))?;
+
+
+
+
+ }
+
+  
+
+
+
+
+  {  //one thread
+
+    // let mut not_found1 = vec![];
+    // let mut mobile_nice1= vec![];
+    // let mut mobile_no1 = vec![];
+
+    // let driver: WebDriver = spawn_cdriver_and_login(BASE_URL2).await;
+
+
+
+    //   for (id, name) in users {
+    //     println!("USER:: {},   index:: {}", name, id);
+    //     if let Err(e) = process_user(&driver, id, &name, BASE_URL3, &mut not_found1, &mut mobile_nice1, &mut mobile_no1).await {
+    //       eprintln!("Ошибка при обработке {}: {}", name, e);
+    //     }
+    //   }
+
+    // println!("\nNOT FOUND:");
+    // for name in &not_found1 {
+    //     println!("{}", name);
+    // }
+    // println!("\nGOOD MOBILE:");
+    // for name in &mobile_nice1 {
+    //     println!("{}", name);
+    // }
+    // println!("\nNO MOBILE:");
+    // for name in &mobile_no1 {
+    //     println!("{}", name);
+    // }
+
+    // driver.quit().await?;
+
   }
 
-  println!("\nNOT FOUND:");
-for name in &not_found {
-    println!("{}", name);
-}
-println!("\nGOOD MOBILE:");
-for name in &mobile_nice {
-    println!("{}", name);
-}
-println!("\nNO MOBILE:");
-for name in &mobile_no {
-    println!("{}", name);
-}
+    let duration = start.elapsed();
+    println!("Завершение. Выполнение заняло: {:?}", duration);
 
-  driver.quit().await?;
-
-  let duration = start.elapsed();
-  println!("Завершение. Выполнение заняло: {:?}", duration);
-  Ok(())
+    Ok(())
 }
