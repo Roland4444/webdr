@@ -72,46 +72,106 @@ fn is_good_android(user_name: &str) -> bool {
         false
     }
 }
-async fn click_safety_in_iframe(driver: &WebDriver) -> Result<()> {
-    sleep(Duration::from_secs(2)).await;
-    let iframes = driver.find_all(By::Tag("iframe")).await?;
-    for (idx, iframe) in iframes.iter().enumerate() {
-        if let Ok(_) = driver.enter_frame(idx as u16).await {
-            let elements = driver.find_all(By::ClassName("ui-btn-text-inner")).await?;
-            for el in elements {
-                let text = el.text().await.unwrap_or_default();
-                if text.contains("Безопасность") {
-                    el.click().await?;
-                    driver.enter_default_frame().await?;
-                    return Ok(());
-                }
-            }
-            driver.enter_default_frame().await?;
-        }
-    }
-    anyhow::bail!("Не найден iframe с кнопкой 'Безопасность'");
-}
+// async fn click_safety_in_iframe(driver: &WebDriver) -> Result<()> {
+//     sleep(Duration::from_secs(2)).await;
+//     let iframes = driver.find_all(By::Tag("iframe")).await?;
+//     for (idx, iframe) in iframes.iter().enumerate() {
+//         if let Ok(_) = driver.enter_frame(idx as u16).await {
+//             let elements = driver.find_all(By::ClassName("ui-btn-text-inner")).await?;
+//             for el in elements {
+//                 let text = el.text().await.unwrap_or_default();
+//                 if text.contains("Безопасность") {
+//                     el.click().await?;
+//                     driver.enter_default_frame().await?;
+//                     return Ok(());
+//                 }
+//             }
+//             driver.enter_default_frame().await?;
+//         }
+//     }
+//     anyhow::bail!("Не найден iframe с кнопкой 'Безопасность'");
+// }
 
-async fn click_history_in_iframe(driver: &WebDriver) -> Result<()> {
-    sleep(Duration::from_secs(2)).await;
+
+async fn click_safety_in_iframe(driver: &WebDriver) -> Result<()> {
+    sleep(Duration::from_secs(3)).await;
     let iframes = driver.find_all(By::Tag("iframe")).await?;
-    for (idx, iframe) in iframes.iter().enumerate() {
-        if let Ok(_) = driver.enter_frame(idx as u16).await {
-            let elements = driver
-                .find_all(By::XPath(
-                    "//div[@class='ui-sidepanel-menu-link-text' and text()='История входов']",
-                ))
-                .await?;
-            if !elements.is_empty() {
-                elements[0].click().await?;
+    for (idx, _) in iframes.iter().enumerate() {
+        if driver.enter_frame(idx as u16).await.is_ok() {
+            // Ищем кнопку с текстом "Безопасность" (можно искать по XPath)
+            let btn = driver
+                .query(By::XPath("//*[contains(text(), 'Безопасность')]"))
+                .wait(Duration::from_secs(5), Duration::from_millis(500))
+                .and_clickable()
+                .first()
+                .await;
+            if let Ok(b) = btn {
+                b.scroll_into_view().await?;
+                // Пробуем кликнуть, если не выходит — через JS
+                if let Err(e) = b.click().await {
+                    driver.execute("arguments[0].click();", vec![b.to_json()?]).await?;
+                }
                 driver.enter_default_frame().await?;
                 return Ok(());
             }
             driver.enter_default_frame().await?;
         }
     }
-    anyhow::bail!("Не найден iframe с 'История входов'");
+    anyhow::bail!("Кнопка 'Безопасность' не найдена ни в одном iframe");
 }
+
+
+
+
+
+
+async fn click_history_in_iframe(driver: &WebDriver) -> Result<()> {
+    sleep(Duration::from_secs(2)).await;
+    let iframes = driver.find_all(By::Tag("iframe")).await?;
+    for (idx, _) in iframes.iter().enumerate() {
+        if driver.enter_frame(idx as u16).await.is_ok() {
+            let btn = driver
+                .query(By::XPath("//*[contains(text(), 'История входов')]"))
+                .wait(Duration::from_secs(5), Duration::from_millis(500))
+                .and_clickable()
+                .first()
+                .await;
+            if let Ok(b) = btn {
+                b.scroll_into_view().await?;
+                if let Err(e) = b.click().await {
+                    driver.execute("arguments[0].click();", vec![b.to_json()?]).await?;
+                }
+                driver.enter_default_frame().await?;
+                return Ok(());
+            }
+            driver.enter_default_frame().await?;
+        }
+    }
+    anyhow::bail!("Кнопка 'История входов' не найдена");
+}
+
+
+
+// async fn click_history_in_iframe(driver: &WebDriver) -> Result<()> {
+//     sleep(Duration::from_secs(2)).await;
+//     let iframes = driver.find_all(By::Tag("iframe")).await?;
+//     for (idx, iframe) in iframes.iter().enumerate() {
+//         if let Ok(_) = driver.enter_frame(idx as u16).await {
+//             let elements = driver
+//                 .find_all(By::XPath(
+//                     "//div[@class='ui-sidepanel-menu-link-text' and text()='История входов']",
+//                 ))
+//                 .await?;
+//             if !elements.is_empty() {
+//                 elements[0].click().await?;
+//                 driver.enter_default_frame().await?;
+//                 return Ok(());
+//             }
+//             driver.enter_default_frame().await?;
+//         }
+//     }
+//     anyhow::bail!("Не найден iframe с 'История входов'");
+// }
 async fn process_user(
     driver: &WebDriver,
     user_id: u32,
