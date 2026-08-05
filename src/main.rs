@@ -7,6 +7,12 @@ use std::io::{BufRead, BufReader, Write};
 use thirtyfour::Key;
 use std::time::Instant;
 
+const USERS_FILE: &str = "USERS";
+const NOT_FOUND_FILE: &str = "NOT_FOUND_NAME.txt";
+const MOBILE_NICE_FILE: &str = "MOBILE_NICE_NAME.txt";
+const MOBILE_NO_FILE: &str = "MOBILE_NO.txt";
+const DESKTOP_NO_FILE: &str = "DESKTOP_NO.txt";
+
 
 fn read_users(file_path: &str) -> Result<Vec<(u32, String)>>{
     let file = File::open(file_path).context("unable to open file USERS")?;
@@ -50,6 +56,15 @@ fn is_good_android(user_name: &str) -> bool {
         false
     }
 }
+
+fn is_no_desktop(user_name: &str) -> bool {
+    let filename = format!("{}_history.html", user_name);
+    if let Ok(html) = fs::read_to_string(&filename){
+        html.contains("Windows")
+    } else {
+        false
+    }
+}
 async fn click_safety_in_iframe(driver: &WebDriver) -> Result<()> {
     sleep(Duration::from_secs(2)).await;
     let iframes = driver.find_all(By::Tag("iframe")).await?;
@@ -89,7 +104,7 @@ async fn click_history_in_iframe(driver: &WebDriver) -> Result<()> {
     anyhow::bail!("Не найден iframe с 'История входов'");
 }
 async fn process_user(driver: &WebDriver,  user_id: u32, full_name: &str, base_url: &str, not_found_list: &mut Vec<String>, 
-    mobile_nice: &mut Vec<String>, mobile_no: &mut Vec<String>) -> Result<()>{
+    mobile_nice: &mut Vec<String>, mobile_no: &mut Vec<String>, desktop_no: &mut Vec<String>) -> Result<()>{
         let profile_url = format!("{}/company/personal/user/{}", base_url, user_id);
         println!("LINK::{}", profile_url);
         driver.goto(&profile_url).await?;
@@ -137,10 +152,14 @@ async fn process_user(driver: &WebDriver,  user_id: u32, full_name: &str, base_u
 
         if is_good_android(full_name) {
             mobile_nice.push(full_name.to_string());
-            append_to_file("MOBILE_NICE_NAME.txt", full_name)?;
+            append_to_file(MOBILE_NICE_FILE, full_name)?;
         } else {
             mobile_no.push(full_name.to_string());
-            append_to_file("MOBILE_NO.txt", full_name)?;
+            append_to_file(MOBILE_NO_FILE, full_name)?;
+        };
+        if is_no_desktop(full_name) {
+           desktop_no.push(full_name.to_string());
+           append_to_file(DESKTOP_NO_FILE, full_name);
         }
 
         Ok(())
@@ -256,10 +275,8 @@ async fn main() -> Result<()> {
   let start = Instant::now();
   println!("Начало выполнения: {:?}", start);
 
-  const USERS_FILE: &str = "USERS";
-  const NOT_FOUND_FILE: &str = "NOT_FOUND_NAME.txt";
-  const MOBILE_NICE_FILE: &str = "MOBILE_NICE_NAME.txt";
-  const MOBILE_NO_FILE: &str = "MOBILE_NO.txt";
+
+
   const BASE_URL: &str = "https://relits.bitrix24.ru";
 
   let users = read_users(USERS_FILE)?;
@@ -276,10 +293,11 @@ async fn main() -> Result<()> {
   let mut not_found = Vec::new();
   let mut mobile_nice = Vec::new();
   let mut mobile_no = Vec::new();
+  let mut desktop_no = Vec::new();
 
   for (id, name) in users {
     println!("USER:: {},   index:: {}", name, id);
-    if let Err(e) = process_user(&driver, id, &name, BASE_URL, &mut not_found, &mut mobile_nice, &mut mobile_no).await {
+    if let Err(e) = process_user(&driver, id, &name, BASE_URL, &mut not_found, &mut mobile_nice, &mut mobile_no, &mut desktop_no).await {
       eprintln!("Ошибка при обработке {}: {}", name, e);
     }
   }
