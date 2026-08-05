@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, Write};
+use std::print;
 use std::sync::Arc;
 use thirtyfour::By;
 use thirtyfour::Key;
@@ -72,6 +73,22 @@ fn is_good_android(user_name: &str) -> bool {
         false
     }
 }
+
+fn is_no_desktop(user_name: &str) -> bool {
+
+    println!("NAME:: {}", user_name);
+    let filename = format!("{}_history.html", user_name);
+    if let Ok(html) = fs::read_to_string(&filename){
+        let res = !html.contains("Windows")  &&   !html.contains("Win");
+        if res { print!("!!! its no desktop there!!!!")} 
+        else {
+                println!("DESKTOP MPRESENT!");
+        }
+        res
+    } else {
+        false
+    }
+}
 // async fn click_safety_in_iframe(driver: &WebDriver) -> Result<()> {
 //     sleep(Duration::from_secs(2)).await;
 //     let iframes = driver.find_all(By::Tag("iframe")).await?;
@@ -105,12 +122,18 @@ async fn click_safety_in_iframe(driver: &WebDriver) -> Result<()> {
                 .and_clickable()
                 .first()
                 .await;
+        //    // if let Ok(b) = btn {
+        //    //     b.scroll_into_view().await?;
+        //    //     // Пробуем кликнуть, если не выходит — через JS
+        //    //     if let Err(e) = b.click().await {
+        //    //         driver.execute("arguments[0].click();", vec![b.to_json()?]).await?;
+        //    //     }
+        //    //     driver.enter_default_frame().await?;
+        //    //     return Ok(());
+        //    // }
             if let Ok(b) = btn {
                 b.scroll_into_view().await?;
-                // Пробуем кликнуть, если не выходит — через JS
-                if let Err(e) = b.click().await {
-                    driver.execute("arguments[0].click();", vec![b.to_json()?]).await?;
-                }
+                driver.execute("arguments[0].click();", vec![b.to_json()?]).await?;
                 driver.enter_default_frame().await?;
                 return Ok(());
             }
@@ -136,11 +159,17 @@ async fn click_history_in_iframe(driver: &WebDriver) -> Result<()> {
                 .and_clickable()
                 .first()
                 .await;
+//            // if let Ok(b) = btn {
+//            //     b.scroll_into_view().await?;
+//            //     if let Err(e) = b.click().await {
+//            //         driver.execute("arguments[0].click();", vec![b.to_json()?]).await?;
+//            //     }
+//            //     driver.enter_default_frame().await?;
+//            //     return Ok(());
+//            // }
             if let Ok(b) = btn {
                 b.scroll_into_view().await?;
-                if let Err(e) = b.click().await {
-                    driver.execute("arguments[0].click();", vec![b.to_json()?]).await?;
-                }
+                driver.execute("arguments[0].click();", vec![b.to_json()?]).await?;
                 driver.enter_default_frame().await?;
                 return Ok(());
             }
@@ -180,6 +209,7 @@ async fn process_user(
     not_found_list: &mut Vec<String>,
     mobile_nice: &mut Vec<String>,
     mobile_no: &mut Vec<String>,
+    desktop_no: &mut Vec<String>
 ) -> Result<()> {
     let profile_url = format!("{}/company/personal/user/{}", base_url, user_id);
     println!("LINK::{}", profile_url);
@@ -209,9 +239,18 @@ async fn process_user(
     search_input.send_keys(Key::Return).await?;
     sleep(Duration::from_secs(2)).await;
 
+//    // let profile_links = driver
+//    //     .find_all(By::ClassName("user-grid_full-name-label"))
+//    //     .await?;
     let profile_links = driver
-        .find_all(By::ClassName("user-grid_full-name-label"))
-        .await?;
+    .query(By::ClassName("user-grid_full-name-label"))
+    .wait(Duration::from_secs(10), Duration::from_millis(500))
+    .all()
+    .await?;
+
+
+
+
     if profile_links.is_empty() {
         println!("NOT FOUND: {}", full_name);
         not_found_list.push(full_name.to_string());
@@ -235,6 +274,10 @@ async fn process_user(
     } else {
         mobile_no.push(full_name.to_string());
     //    append_to_file("MOBILE_NO.txt", full_name)?;
+    }
+
+    if is_no_desktop(full_name) {
+        desktop_no.push(full_name.to_string());
     }
 
     Ok(())
@@ -444,6 +487,7 @@ async fn main() -> Result<()> {
     const NOT_FOUND_FILE: &str = "NOT_FOUND_NAME.txt";
     const MOBILE_NICE_FILE: &str = "MOBILE_NICE_NAME.txt";
     const MOBILE_NO_FILE: &str = "MOBILE_NO.txt";
+    const DESKTOP_NO_FILE: &str = "DESKTOP_NO.txt";
 
     let users = read_users(USERS_FILE)?;
     if users.is_empty() {
@@ -456,7 +500,7 @@ async fn main() -> Result<()> {
     let _ = caps.add_arg("--disable-dev-shm-usage");
     let mut driver_pack: Vec<WebDriver> = vec![];
 
-    let number_drivers: u32 = 8;
+    let number_drivers: u32 = 1;//8;
 
     let BASE_URL: String = "https://relits.bitrix24.ru".to_string();
     let BASE_URL2: String = "https://relits.bitrix24.ru".to_string();
@@ -466,12 +510,10 @@ async fn main() -> Result<()> {
 
  {  // multythreadf
 
-    let not_found = Arc::new(Mutex::new(Vec::new()));
-    let mobile_nice = Arc::new(Mutex::new(Vec::new()));
-    let mobile_no = Arc::new(Mutex::new(Vec::new()));
-
-
-
+    let not_found       = Arc::new(Mutex::new(Vec::new()));
+    let mobile_nice     = Arc::new(Mutex::new(Vec::new()));
+    let mobile_no       = Arc::new(Mutex::new(Vec::new()));
+    let desktop_no   = Arc::new(Mutex::new(Vec::new()));
 
     let mut id_vecs_4_druver: Vec<Vec<(u32, String)>> = vec![];
 
@@ -482,12 +524,9 @@ async fn main() -> Result<()> {
         let driver = spawn_cdriver_and_login(BASE_URL.clone()).await;
         driver_pack.push(driver);
 
-        sleep(Duration::from_secs(10)).await;
+       // sleep(Duration::from_secs(2)).await;
 
     }
-
-
-
 
 
     let mut tasks = Vec::new();
@@ -496,12 +535,14 @@ async fn main() -> Result<()> {
         let not_found_clone = not_found.clone();
         let mobile_nice_clone = mobile_nice.clone();
         let mobile_no_clone = mobile_no.clone();
+        let desktop_no_clone = desktop_no.clone();
 
         let task = tokio::spawn(async move {
             // Локальные буферы для этой задачи
             let mut local_not_found = Vec::new();
             let mut local_mobile_nice = Vec::new();
             let mut local_mobile_no = Vec::new();
+            let mut local_desktop_no = Vec::new();
 
             for (id, name) in group {
                 println!("Поток {} обрабатывает {} (ID {})", i, name, id);
@@ -513,6 +554,7 @@ async fn main() -> Result<()> {
                     &mut local_not_found,
                     &mut local_mobile_nice,
                     &mut local_mobile_no,
+                    &mut local_desktop_no
                 )
                 .await
                 {
@@ -562,6 +604,13 @@ async fn main() -> Result<()> {
     for name in mobile_no_guard.iter() {
         println!("{}", name);
     }
+
+
+    let no_desktop_guard = desktop_no.lock().await;
+    println!("\nNO DESKTOP:");
+    for name in no_desktop_guard.iter() {
+        println!("{}", name);
+    }
     for dr in driver_pack{
         dr.quit().await?;
     }
@@ -570,6 +619,8 @@ async fn main() -> Result<()> {
     std::fs::write(NOT_FOUND_FILE, not_found_guard.join("\n"))?;
     std::fs::write(MOBILE_NICE_FILE, mobile_nice_guard.join("\n"))?;
     std::fs::write(MOBILE_NO_FILE, mobile_no_guard.join("\n"))?;
+    std::fs::write(DESKTOP_NO_FILE, no_desktop_guard.join("\n"))?;
+
 
 
 
