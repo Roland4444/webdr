@@ -481,6 +481,9 @@ async fn main() -> Result<()> {
     for i in 1..=number_drivers {
         let driver = spawn_cdriver_and_login(BASE_URL.clone()).await;
         driver_pack.push(driver);
+
+        sleep(Duration::from_secs(10)).await;
+
     }
 
 
