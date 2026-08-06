@@ -277,6 +277,7 @@ async fn process_user(
     }
 
     if is_no_desktop(full_name) {
+        println!("ADDED  no desktop{}", full_name);
         desktop_no.push(full_name.to_string());
     }
 
@@ -500,7 +501,7 @@ async fn main() -> Result<()> {
     let _ = caps.add_arg("--disable-dev-shm-usage");
     let mut driver_pack: Vec<WebDriver> = vec![];
 
-    let number_drivers: u32 = 1;//8;
+    let number_drivers: u32 = 8;//8;
 
     let BASE_URL: String = "https://relits.bitrix24.ru".to_string();
     let BASE_URL2: String = "https://relits.bitrix24.ru".to_string();
@@ -513,7 +514,7 @@ async fn main() -> Result<()> {
     let not_found       = Arc::new(Mutex::new(Vec::new()));
     let mobile_nice     = Arc::new(Mutex::new(Vec::new()));
     let mobile_no       = Arc::new(Mutex::new(Vec::new()));
-    let desktop_no   = Arc::new(Mutex::new(Vec::new()));
+    let desktop_no: Arc<Mutex<Vec<String>>>      = Arc::new(Mutex::new(Vec::new()));
 
     let mut id_vecs_4_druver: Vec<Vec<(u32, String)>> = vec![];
 
@@ -576,6 +577,11 @@ async fn main() -> Result<()> {
                 guard.extend(local_mobile_no);
             }
 
+
+            {
+                let mut guard = desktop_no_clone.lock().await;
+                guard.extend(local_desktop_no);
+            }
             Ok::<_, anyhow::Error>(())
         });
         tasks.push(task);
