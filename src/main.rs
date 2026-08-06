@@ -13,8 +13,26 @@ use std::time::Instant;
 
 pub const PASS_FIELNAME: &str = "pass";
 const LOGIN_FILENAME: &str = "login";
-
+const CLEANUP_ON: bool = true;
 const URL_WS_CONNECT: &str = "ws://127.0.0.1:3000/proc";
+
+
+fn clean_up() -> std::io::Result<()> {
+    let entries = fs::read_dir(".")?;
+    for entry in entries {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_file() {
+            if let Some(ext) = path.extension() {
+                if ext == "html" {
+                    fs::remove_file(&path)?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 
 fn pass() -> Option<String> {
     read_from_file(PASS_FIELNAME)
@@ -222,11 +240,21 @@ async fn process_user(
             FIRST_LOAD = false;
         }
     }
-    let menu_items = driver
-        .find_all(By::ClassName("menu-item-link-text"))
-        .await?;
+    // let menu_items = driver
+    //     .find_all(By::ClassName("menu-item-link-text"))
+    //     .await?;
+    // if menu_items.len() > 12 {
+    //     menu_items[12].click().await?;
+    // } else {
+    //     anyhow::bail!("Меню слишком короткое");
+    // }
+
+
+    let menu_items = driver.find_all(By::ClassName("menu-item-link-text")).await?;
     if menu_items.len() > 12 {
-        menu_items[12].click().await?;
+        let target = &menu_items[12];
+        target.scroll_into_view().await?;
+        driver.execute("arguments[0].click();", vec![target.to_json()?]).await?;
     } else {
         anyhow::bail!("Меню слишком короткое");
     }
@@ -483,6 +511,7 @@ fn split_vec_4_vec(input: Vec<(u32, String)>, split_to: u32) -> Vec<Vec<(u32, St
 #[tokio::main]
 async fn main() -> Result<()> {
     let start = Instant::now();
+    let _ =  clean_up();
     println!("Начало выполнения: {:?}", start);
     const USERS_FILE: &str = "USERS";
     const NOT_FOUND_FILE: &str = "NOT_FOUND_NAME.txt";
@@ -673,6 +702,11 @@ async fn main() -> Result<()> {
   }
 
     let duration = start.elapsed();
+
+    if CLEANUP_ON{
+        let _ = clean_up();
+    }
+
     println!("Завершение. Выполнение заняло: {:?}", duration);
 
     Ok(())
