@@ -9,7 +9,8 @@ use thirtyfour::prelude::*;
 use tokio::sync::Mutex;
 use tokio::time::{Duration, sleep};
 use std::time::Instant;
-
+use std::convert::TryInto;
+use serde_json::Value;
 
 pub const PASS_FIELNAME: &str = "pass";
 const LOGIN_FILENAME: &str = "login";
@@ -129,6 +130,29 @@ fn is_no_desktop(user_name: &str) -> bool {
 
 
 async fn click_safety_in_iframe(driver: &WebDriver) -> Result<()> {
+    sleep(Duration::from_secs(3)).await;
+    let iframes = driver.find_all(By::Tag("iframe")).await?;
+    for (idx, _) in iframes.iter().enumerate() {
+        if driver.enter_frame(idx as u16).await.is_ok() {
+            let btn = driver
+                .query(By::XPath("//*[contains(text(), 'Безопасность')]"))
+                .wait(Duration::from_secs(5), Duration::from_millis(500))
+                .and_clickable()
+                .first()
+                .await;
+            if let Ok(b) = btn {
+                b.scroll_into_view().await?;
+                driver.execute("arguments[0].click();", vec![b.to_json()?]).await?;
+                // НЕ выходим из iframe – оставляем контекст внутри
+                return Ok(());
+            }
+            driver.enter_default_frame().await?;
+        }
+    }
+    anyhow::bail!("Кнопка 'Безопасность' не найдена");
+}
+
+async fn click_safety_in_iframe__(driver: &WebDriver) -> Result<()> {
     sleep(Duration::from_secs(3)).await;
     let iframes = driver.find_all(By::Tag("iframe")).await?;
     for (idx, _) in iframes.iter().enumerate() {
@@ -291,6 +315,11 @@ async fn process_user(
 
     click_safety_in_iframe(driver).await?;
     sleep(Duration::from_secs(2)).await;
+
+    check_two_factor_status(driver, full_name).await?;
+
+    driver.enter_default_frame().await?;
+
     click_history_in_iframe(driver).await?;
 
     let filename = find_table_after_clicking_history(driver, full_name).await?;
@@ -320,6 +349,54 @@ async fn wait_for_element(driver: &WebDriver, by: By, timeout_secs: u64) -> Resu
         sleep(Duration::from_millis(500)).await;
     }
     anyhow::bail!("Элемент не найден за {} секунд", timeout_secs)
+}
+
+async fn check_two_factor_status(driver: &WebDriver, full_name: &str) -> Result<()> {
+    let xpath = "//div[contains(@class, 'intranet-user-otp-list__section-row-header') and .//span[contains(text(), 'Двухфакторная аутентификация')]]//div[contains(@class, 'intranet-user-otp-list__row-value')]";
+
+    let start = Instant::now();
+    let timeout = Duration::from_secs(30); // увеличенный таймаут
+
+    while start.elapsed() < timeout {
+        // 1. Проверяем текущий контекст (может быть default)
+        if let Ok(el) = driver.find(By::XPath(xpath)).await {
+            let status = el.text().await?.trim().to_string();
+            if !status.is_empty() {
+                print_2fa_status(full_name, &status);
+                return Ok(());
+            }
+        }
+
+        // 2. Обходим все iframe первого уровня
+        let iframes = driver.find_all(By::Tag("iframe")).await?;
+        for idx in 0..iframes.len() {
+            if driver.enter_frame(idx as u16).await.is_err() {
+                continue;
+            }
+            if let Ok(el) = driver.find(By::XPath(xpath)).await {
+                let status = el.text().await?.trim().to_string();
+                if !status.is_empty() {
+                    print_2fa_status(full_name, &status);
+                    driver.enter_default_frame().await?;
+                    return Ok(());
+                }
+            }
+            driver.enter_default_frame().await?;
+        }
+
+        sleep(Duration::from_millis(500)).await;
+    }
+
+    println!("⚠️ {}: Не удалось найти блок двухфакторной аутентификации за 30 секунд", full_name);
+    Ok(())
+}
+
+fn print_2fa_status(name: &str, status: &str) {
+    if status.contains("Не подключена") || status.contains("Отключена") {
+        println!("🔴 {}: Двухфакторная аутентификация НЕ подключена (статус: {})", name, status);
+    } else {
+        println!("🟢 {}: Двухфакторная аутентификация ПОДКЛЮЧЕНА (статус: {})", name, status);
+    }
 }
 
 async fn save_table_tbodies(table: &WebElement, filename: &str) -> Result<()> {
@@ -508,7 +585,7 @@ fn split_vec_4_vec(input: Vec<(u32, String)>, split_to: u32) -> Vec<Vec<(u32, St
 }
 
 
-#[tokio::main]
+#[tokio::main]  
 async fn main() -> Result<()> {
     let start = Instant::now();
     let _ =  clean_up();
@@ -530,7 +607,7 @@ async fn main() -> Result<()> {
     let _ = caps.add_arg("--disable-dev-shm-usage");
     let mut driver_pack: Vec<WebDriver> = vec![];
 
-    let number_drivers: u32 = 8;//8;
+    let number_drivers: u32 = 1;//8; 
 
     let BASE_URL: String = "https://relits.bitrix24.ru".to_string();
     let BASE_URL2: String = "https://relits.bitrix24.ru".to_string();
