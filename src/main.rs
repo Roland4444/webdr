@@ -9,7 +9,7 @@ use thirtyfour::prelude::*;
 use tokio::sync::Mutex;
 use tokio::time::{Duration, sleep};
 use std::time::Instant;
-
+use std::path::Path;
 
 pub const PASS_FIELNAME: &str = "pass";
 const LOGIN_FILENAME: &str = "login";
@@ -291,6 +291,8 @@ async fn process_user(
 
     click_safety_in_iframe(driver).await?;
     sleep(Duration::from_secs(2)).await;
+
+    take_screenshot(driver, full_name).await?;
     click_history_in_iframe(driver).await?;
 
     let filename = find_table_after_clicking_history(driver, full_name).await?;
@@ -463,6 +465,15 @@ async fn login_cad(driver: &WebDriver, username: &str, pass: &str) -> Result<()>
 
     Ok(())
 }
+
+
+async fn take_screenshot(driver: &WebDriver, base_name: &str) -> Result<String> {    
+    let filename = format!("{}.jpg", base_name);
+    driver.screenshot(Path::new(&filename)).await?;
+    println!("Скриншот сохранён: {}", filename);
+    Ok(filename)
+}
+
 
 async fn spawn_cdriver_and_login(base_url: String) -> WebDriver {
     let mut caps = DesiredCapabilities::chrome();
